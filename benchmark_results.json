@@ -1,0 +1,62 @@
+{
+  "duration_s": 5,
+  "seed": 42,
+  "stationary": {
+    "baseline": {
+      "move_events": 91,
+      "path_palm_units": 2.140746,
+      "net_x_palm_units": 0.096447
+    },
+    "v02": {
+      "move_events": 0,
+      "path_palm_units": 0,
+      "net_x_palm_units": 0
+    }
+  },
+  "slow": {
+    "baseline": {
+      "move_events": 0,
+      "path_palm_units": 0,
+      "net_x_palm_units": 0
+    },
+    "v02": {
+      "move_events": 279,
+      "path_palm_units": 0.400665,
+      "net_x_palm_units": 0.400665
+    }
+  },
+  "fast": {
+    "baseline": {
+      "move_events": 0,
+      "path_palm_units": 0,
+      "net_x_palm_units": 0
+    },
+    "v02": {
+      "move_events": 296,
+      "path_palm_units": 4.886582,
+      "net_x_palm_units": 4.886582
+    }
+  },
+  "fps_sweep": {
+    "15": {
+      "move_events": 70,
+      "path_palm_units": 0.401124,
+      "net_x_palm_units": 0.401124
+    },
+    "30": {
+      "move_events": 140,
+      "path_palm_units": 0.400814,
+      "net_x_palm_units": 0.400814
+    },
+    "60": {
+      "move_events": 279,
+      "path_palm_units": 0.400665,
+      "net_x_palm_units": 0.400665
+    },
+    "120": {
+      "move_events": 557,
+      "path_palm_units": 0.400783,
+      "net_x_palm_units": 0.400783
+    }
+  }
+}
