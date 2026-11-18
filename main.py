@@ -29,7 +29,11 @@ def arguments():
     parser.add_argument('--model', default=str(Path(__file__).parent / 'models/hand_landmarker.task'))
     parser.add_argument('--camera', type=int, default=0)
     parser.add_argument('--snap-toggle', action='store_true', help='Toggle camera and mouse with two finger snaps')
-    parser.add_argument('--snap-test', action='store_true', help='Test microphone and snap detection without opening the camera')
+    snap_action = parser.add_mutually_exclusive_group()
+    snap_action.add_argument('--snap-test', action='store_true', help='Test microphone and snap detection without opening the camera')
+    snap_action.add_argument('--snap-calibrate', action='store_true', help='Learn local examples of your snaps and other noises')
+    parser.add_argument('--snap-profile', type=Path, default=Path('snap-calibration.json'),
+                        help='Local snap calibration profile')
     parser.add_argument('--start-standby', action='store_true', help='Start with the camera released')
     parser.add_argument('--microphone', type=int, help='Sounddevice input device index for --snap-toggle')
     parser.add_argument('--microphone-mode', choices=('default', 'raw', 'communications', 'compare'),
@@ -78,18 +82,30 @@ def configure(args):
     return cfg
 
 
+def load_snap_profile(path):
+    if not path.exists():
+        return None
+    from snap_signature import SnapProfile
+    profile = SnapProfile.load(path)
+    print(f'Perfil de estalos ativo: {path}', flush=True)
+    return profile
+
+
 def main():
     args = arguments()
-    if args.microphone is None and (args.snap_test or (args.snap_toggle and not args.calibrate)):
+    if args.microphone is None and (args.snap_test or args.snap_calibrate or (args.snap_toggle and not args.calibrate)):
         from windows_audio import warn_if_default_input_muted
         warn_if_default_input_muted()
-    if args.snap_test:
+    if args.snap_test or args.snap_calibrate:
         try:
-            from snaps import compare_microphone_modes, test_microphone
-            if args.microphone_mode == 'compare':
+            from snaps import calibrate_snaps, compare_microphone_modes, test_microphone
+            if args.snap_calibrate:
+                calibrate_snaps(args.snap_profile, args.microphone, args.snap_sensitivity, args.microphone_mode)
+            elif args.microphone_mode == 'compare':
                 compare_microphone_modes(args.microphone, args.snap_sensitivity)
             else:
-                test_microphone(args.microphone, args.snap_sensitivity, args.microphone_mode)
+                profile = load_snap_profile(args.snap_profile)
+                test_microphone(args.microphone, args.snap_sensitivity, args.microphone_mode, profile)
         except (ImportError, OSError, RuntimeError, ValueError) as error:
             raise SystemExit(f'Teste de estalos indisponivel: {error}')
         return
@@ -199,7 +215,8 @@ def main():
         if args.snap_toggle:
             try:
                 from snaps import SnapListener
-                listener = SnapListener(args.microphone, args.snap_sensitivity, args.microphone_mode)
+                profile = load_snap_profile(args.snap_profile)
+                listener = SnapListener(args.microphone, args.snap_sensitivity, args.microphone_mode, profile)
                 print(f'Microfone ativo: {listener.description}. Dois estalos alternam o controlo.', flush=True)
             except (ImportError, OSError, RuntimeError, ValueError) as error:
                 print(f'Detecao de estalos indisponivel: {error}. Usa F8 ou Espaco.', flush=True)

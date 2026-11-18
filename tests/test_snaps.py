@@ -1,4 +1,6 @@
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from time import monotonic
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -119,3 +121,53 @@ class SnapTests(unittest.TestCase):
             t = np.arange(rate//8)/rate
             audio[start:start+len(t)] = .5*np.sin(2*np.pi*3500*t)
         self.assertEqual(self.run_audio((.4, .73), audio), [])
+
+    def test_two_short_noisy_bursts_with_longer_decay_do_not_toggle(self):
+        rate = 48000
+        time = np.arange(rate // 10) / rate
+        burst = .18 * np.random.default_rng(14).normal(size=len(time)) * np.exp(-time / .016)
+        audio = np.zeros(rate * 4)
+        for onset in (.405, .89):
+            index = round(onset * rate)
+            audio[index:index+len(burst)] = burst
+        self.assertEqual(self.run_audio((), audio, rate), [])
+
+    def test_distinct_noise_between_snaps_cancels_pair(self):
+        rate = 44100
+        audio = np.zeros(rate * 4)
+        time = np.arange(rate // 20) / rate
+        index = round(.65 * rate)
+        audio[index:index + len(time)] = .4 * np.sin(2 * np.pi * 420 * time)
+        self.assertEqual(self.run_audio((.4, .9), audio), [])
+
+    def test_calibrated_profile_rejects_noise_that_passes_default_filter(self):
+        from snap_signature import SnapProfile, plausible_snap
+        from snaps import SnapPair
+
+        rate = 48000
+        t = np.arange(rate // 25) / rate
+        rng = np.random.default_rng(12)
+        snap = .25 * rng.choice((-1., 1.), len(t)) * np.exp(-t / .0012)
+        noise = .17 * rng.normal(size=len(t)) * np.exp(-t / .010)
+
+        def replay(sound, profile=None):
+            candidates = []
+            detector = SnapPair(rate, profile=profile, on_candidate=lambda _, features: candidates.append(features))
+            audio = np.zeros(rate * 2)
+            for onset in (.405, .89):
+                start = round(onset * rate)
+                audio[start:start + len(sound)] = sound
+            toggles = sum(detector.feed(audio[i:i + 480]) for i in range(0, len(audio), 480))
+            return candidates, toggles
+
+        snaps, baseline = replay(snap)
+        sounds, false_positives = replay(noise)
+        self.assertEqual(baseline, 1)
+        self.assertEqual(false_positives, 1)
+        self.assertTrue(plausible_snap(sounds[0]))
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / 'snap-calibration.json'
+            SnapProfile([*snaps, snaps[0]], sounds).save(path)
+            profile = SnapProfile.load(path)
+            self.assertEqual(replay(snap, profile)[1], 1)
+            self.assertEqual(replay(noise, profile)[1], 0)

@@ -2,6 +2,8 @@
 __pycache__/
 *.py[cod]
 /calibration.json
+/snap-calibration.json
+/snap-calibration.json.tmp
 /calibration_log_summary.json
 *.jsonl
 /models/*.task

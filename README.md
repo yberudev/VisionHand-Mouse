@@ -65,7 +65,16 @@ Se o Windows captar voz nesse microfone e a aplicação continuar em zero, compa
 
 O modo `raw` solicita ao Windows captura sem processamento adaptativo, quando suportada pelo controlador. `communications` usa a categoria de chamadas. Ambos usam captura partilhada. Se a comparação indicar um modo com sinal, acrescenta o índice e o modo indicados ao comando do rato. Para confirmar os estalos antes disso, usa `--snap-test` com essas mesmas opções. A comparação só mede picos, sem gravar áudio.
 
-**F8** e **Espaço** na janela fazem a mesma alternância. **F9** fecha o programa e liberta também o microfone. Retira `--start-standby` para abrir a câmara logo no arranque. Usa `--snap-sensitivity 1.5` se os teus estalos não forem apanhados, ou `--snap-sensitivity 0.8` se houver ativações indevidas. O detetor reage a impulsos acústicos curtos e agudos, pelo que outros ruídos semelhantes também podem ativá-lo. Para escolher outro microfone, lista os dispositivos com `.\.venv\Scripts\python.exe -m sounddevice` e passa o índice com `--microphone N`.
+**F8** e **Espaço** na janela fazem a mesma alternância. **F9** fecha o programa e liberta também o microfone. Retira `--start-standby` para abrir a câmara logo no arranque. Para escolher outro microfone, lista os dispositivos com `.\.venv\Scripts\python.exe -m sounddevice` e passa o índice com `--microphone N`.
+
+O detetor verifica a duração da energia, a cauda do som e a distribuição das frequências. Os dois impulsos devem ter características semelhantes e um ruído distinto entre eles cancela o par. Se batidas, teclas ou outros ruídos do teu ambiente ainda forem confundidos com estalos, ensina ao programa exemplos dos dois:
+
+```powershell
+.\.venv\Scripts\python.exe main.py --snap-calibrate --microphone 9
+.\.venv\Scripts\python.exe main.py --snap-test --microphone 9
+```
+
+O programa pede cinco estalos isolados, depois exemplos de ruídos que deve ignorar. Usa o mesmo microfone, modo e posição em que pretendes usar o rato. A calibração e o teste deixam a câmara livre. O ficheiro local `snap-calibration.json` contém apenas características numéricas dos sons e é carregado automaticamente por `--snap-test` e `--snap-toggle`. Para reutilizar um perfil noutro caminho, usa `--snap-profile CAMINHO` nos comandos. Sons acusticamente muito parecidos ainda podem exigir nova calibração.
 
 ## Gestos
 

@@ -5,6 +5,8 @@ from time import monotonic, sleep
 
 import numpy as np
 
+from snap_signature import SnapProfile, distance, plausible_snap, signature
+
 MAX_PAIR_GAP = 1.05
 MIN_INPUT_SIGNAL = .0001
 MICROPHONE_MODES = ('default', 'raw', 'communications')
@@ -43,16 +45,18 @@ def microphone_settings(sd, mode):
 
 
 class SnapPair:
-    def __init__(self, sample_rate, sensitivity=1.0):
+    def __init__(self, sample_rate, sensitivity=1.0, profile=None, on_candidate=None):
         self.sample_rate = sample_rate
         self.sensitivity = sensitivity
+        self.profile = profile
+        self.on_candidate = on_candidate
         self.reset()
 
     def reset(self):
         self.elapsed = 0.
         self.noise = .0015
         self.onset = None
-        self.bright = False
+        self.parts = []
         self.first = None
         self.cooldown_until = 0.
         self.status = 'a ouvir'
@@ -62,6 +66,12 @@ class SnapPair:
     def report(self, status):
         self.status = status
         self.status_count += 1
+
+    def reject(self, onset, reason):
+        if self.first is not None and onset - self.first[0] >= .14:
+            self.first = None
+        self.report(reason)
+        return False
 
     def feed(self, samples):
         """Consume a mono block of about 10 ms and report a completed pair."""
@@ -74,38 +84,43 @@ class SnapPair:
         loud = peak >= self.gate and rms >= self.noise*2.4
         target_noise = min(rms, self.noise*2, .025)
         self.noise += .08 * (target_noise-self.noise)
-        if self.first is not None and t-self.first > MAX_PAIR_GAP+.11 and self.onset is None:
+        if self.first is not None and t-self.first[0] > MAX_PAIR_GAP+.11 and self.onset is None:
             self.first = None
             self.report('segundo estalo nao chegou a tempo')
         if loud:
             if self.onset is None:
                 self.onset = t
-            if not self.bright and t-self.onset < .065:
-                # Tapering prevents abrupt block boundaries from making bass sound sharp.
-                power = np.abs(np.fft.rfft(samples * np.hanning(len(samples))))**2
-                energy = power[1:].sum()
-                upper = int(np.ceil(len(samples) * 1200 / self.sample_rate))
-                self.bright = bool(energy and power[upper:].sum() > .16*energy
-                                   and power[1:].max() < .42*energy)
+            if t-self.onset < .12:
+                self.parts.append(samples.copy())
             return False
         if self.onset is None:
             return False
-        start, bright = self.onset, self.bright
-        self.onset, self.bright = None, False
+        start, parts = self.onset, self.parts
+        self.onset, self.parts = None, []
         if start < self.cooldown_until:
             return False
         if t-start > .11:
-            self.report('ignorado: som longo')
-            return False
-        if not bright:
-            self.report('ignorado: som sem ataque agudo')
-            return False
-        if self.first is None or start-self.first > MAX_PAIR_GAP:
-            self.first = start
+            return self.reject(start, 'ignorado: som longo')
+        audio = np.concatenate(parts)
+        features = signature(audio, self.sample_rate)
+        if features is not None and self.on_candidate is not None:
+            self.on_candidate(float(np.max(np.abs(audio))), features)
+        if features is None:
+            return self.reject(start, 'ignorado: assinatura diferente de estalo')
+        if self.profile is not None and not self.profile.accepts(features):
+            return self.reject(start, 'ignorado: fora do perfil dos teus estalos')
+        if self.profile is None and not plausible_snap(features):
+            return self.reject(start, 'ignorado: assinatura diferente de estalo')
+        if self.first is None or start-self.first[0] > MAX_PAIR_GAP:
+            self.first = (start, features)
             self.report('primeiro estalo reconhecido')
             return False
-        if start-self.first < .14:
+        if start-self.first[0] < .14:
             return False  # ringing or echo from the first snap
+        if distance(features, self.first[1]) > 1.45:
+            self.first = (start, features)
+            self.report('sons diferentes: a aguardar segundo estalo')
+            return False
         self.first = None
         self.cooldown_until = t + .85
         self.report('dois estalos reconhecidos')
@@ -113,7 +128,7 @@ class SnapPair:
 
 
 class SnapListener:
-    def __init__(self, device=None, sensitivity=1.0, mode='default'):
+    def __init__(self, device=None, sensitivity=1.0, mode='default', profile=None, on_candidate=None):
         import sounddevice as sd
 
         try:
@@ -130,7 +145,7 @@ class SnapListener:
         rate = info['default_samplerate']
         if rate < 8000:
             raise ValueError('Microphone sample rate must be at least 8 kHz')
-        self.detector = SnapPair(rate, sensitivity)
+        self.detector = SnapPair(rate, sensitivity, profile, on_candidate)
         self.blocks = Queue(maxsize=16)
         self.discontinuity = Event()
         self.interruptions = 0
@@ -237,8 +252,8 @@ class SnapListener:
             self.worker.join(timeout=1)
 
 
-def test_microphone(device, sensitivity, mode='default'):
-    listener = SnapListener(device, sensitivity, mode)
+def test_microphone(device, sensitivity, mode='default', profile=None):
+    listener = SnapListener(device, sensitivity, mode, profile)
     try:
         print(f'Microfone: {listener.description}')
         print('Faz pares de estalos. Ctrl+C encerra. A camera fica livre.', flush=True)
@@ -255,6 +270,65 @@ def test_microphone(device, sensitivity, mode='default'):
         raise RuntimeError('O microfone deixou de enviar audio')
     except KeyboardInterrupt:
         pass
+    finally:
+        listener.close()
+
+
+def calibrate_snaps(path, device, sensitivity, mode):
+    queue = Queue(maxsize=32)
+
+    def collect(peak, features):
+        try:
+            queue.put_nowait((peak, features))
+        except Full:
+            pass
+
+    listener = SnapListener(device, sensitivity, mode, on_candidate=collect)
+    try:
+        print(f'Microfone: {listener.description}')
+        print('Cada rodada dura 2 segundos. Faz o som apenas quando aparecer AGORA. Ctrl+C cancela.')
+
+        def example(prompt):
+            input(prompt + ' Carrega Enter para preparar.')
+            sleep(.3)
+            while True:
+                try:
+                    queue.get_nowait()
+                except Empty:
+                    break
+            print('AGORA', flush=True)
+            sleep(2)
+            candidates = []
+            while True:
+                try:
+                    candidates.append(queue.get_nowait())
+                except Empty:
+                    break
+            return max(candidates, key=lambda item: item[0])[1] if candidates else None
+
+        positive = []
+        for i in range(5):
+            features = example(f'Estalo {i+1}/5. Faz um estalo com o dedo.')
+            if features is not None and .18 <= features[0] <= 38:
+                positive.append(features)
+            else:
+                print('A captura nao encontrou um estalo isolado nesta rodada.')
+        if len(positive) < 3:
+            raise ValueError('Sao necessarios pelo menos tres estalos claros para calibrar.')
+
+        negative = []
+        for prompt in ('Carrega numa tecla ou clica com o rato.',
+                       'Da uma batida leve na mesa.', 'Repete o ruido que ativava o rato.'):
+            features = example(prompt)
+            if features is not None:
+                negative.append(features)
+        profile = SnapProfile(positive, negative)
+        if sum(profile.accepts(item) for item in positive) < 3:
+            raise ValueError('Estalos e ruidos demasiado semelhantes nesta captura. Repete mais perto do microfone.')
+        profile.save(path)
+        print(f'Perfil guardado em {path}. Estalos: {len(positive)}. Ruidos: {len(negative)}. Sem gravacao de audio.')
+    except (KeyboardInterrupt, EOFError):
+        print('\nCalibracao cancelada.')
     finally:
         listener.close()
 
