@@ -122,6 +122,9 @@ class SnapListener:
             raise RuntimeError(f'Microfone indisponivel: {error}') from error
         self.device_name = info['name']
         self.device_index = info['index']
+        if self.host_name == 'Windows WASAPI':
+            from windows_audio import warn_if_selected_input_muted
+            warn_if_selected_input_muted(self.device_index, self.device_name, getattr(sd, '_libname', None))
         self.mode = mode
         self.extra_settings = microphone_settings(sd, mode)
         rate = info['default_samplerate']

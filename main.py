@@ -80,7 +80,7 @@ def configure(args):
 
 def main():
     args = arguments()
-    if args.snap_test or (args.snap_toggle and not args.calibrate):
+    if args.microphone is None and (args.snap_test or (args.snap_toggle and not args.calibrate)):
         from windows_audio import warn_if_default_input_muted
         warn_if_default_input_muted()
     if args.snap_test:

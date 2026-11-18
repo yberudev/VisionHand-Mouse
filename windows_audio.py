@@ -1,5 +1,5 @@
-"""Read the default Windows recording endpoint's mute and volume settings."""
-from contextlib import ExitStack
+"""Read Windows recording endpoint settings without changing them."""
+from contextlib import ExitStack, contextmanager
 import ctypes as ct
 from dataclasses import dataclass
 import os
@@ -32,17 +32,13 @@ def _release(interface):
     _method(interface, 2, ct.c_ulong)()  # IUnknown::Release
 
 
-def default_input_status():
-    if os.name != 'nt':
-        return None
+@contextmanager
+def _com():
     ole = ct.WinDLL('ole32')
     ptr = ct.c_void_p
-    out_ptr = ct.POINTER(ptr)
     hresult = ct.c_long
     ole.CoInitializeEx.argtypes = (ptr, ct.c_ulong)
     ole.CoInitializeEx.restype = hresult
-    ole.CoCreateInstance.argtypes = (ptr, ptr, ct.c_ulong, ptr, out_ptr)
-    ole.CoCreateInstance.restype = hresult
     ole.CoUninitialize.argtypes = ()
     ole.CoUninitialize.restype = None
 
@@ -52,7 +48,18 @@ def default_input_status():
             cleanup.callback(ole.CoUninitialize)
         elif result & 0xFFFFFFFF != 0x80010106:  # Thread already has a different COM apartment.
             _check(result, 'CoInitializeEx')
+        yield ole, cleanup
 
+
+def default_input_status():
+    if os.name != 'nt':
+        return None
+    ptr = ct.c_void_p
+    out_ptr = ct.POINTER(ptr)
+    hresult = ct.c_long
+    with _com() as (ole, cleanup):
+        ole.CoCreateInstance.argtypes = (ptr, ptr, ct.c_ulong, ptr, out_ptr)
+        ole.CoCreateInstance.restype = hresult
         enumerator = ptr()
         _check(ole.CoCreateInstance(_guid('BCDE0395-E52F-467C-8E3D-C4579291692E'), None, 23,
                                     _guid('A95664D2-9614-4F35-A746-DE8DB63617E6'),
@@ -63,9 +70,15 @@ def default_input_status():
         get_default = _method(enumerator, 4, hresult, ct.c_int, ct.c_int, out_ptr)
         _check(get_default(1, 0, ct.byref(endpoint)), 'GetDefaultAudioEndpoint')  # eCapture, eConsole
         cleanup.callback(_release, endpoint)
+        return _endpoint_status(endpoint)
 
+
+def _endpoint_status(endpoint):
+    ptr = ct.c_void_p
+    hresult = ct.c_long
+    with ExitStack() as cleanup:
         volume = ptr()
-        activate = _method(endpoint, 3, hresult, ptr, ct.c_ulong, ptr, out_ptr)
+        activate = _method(endpoint, 3, hresult, ptr, ct.c_ulong, ptr, ct.POINTER(ptr))
         _check(activate(_guid('5CDF2C82-841E-4546-9722-0CF74078229A'), 23, None, ct.byref(volume)),
                'IAudioEndpointVolume')
         cleanup.callback(_release, volume)
@@ -76,6 +89,34 @@ def default_input_status():
         _check(get_mute(ct.byref(muted)), 'GetMute')
         _check(get_level(ct.byref(level)), 'GetMasterVolumeLevelScalar')
         return InputStatus(bool(muted.value), level.value)
+
+
+def wasapi_input_status(device_index, portaudio_library):
+    if os.name != 'nt' or not portaudio_library:
+        return None
+    library = ct.CDLL(portaudio_library)
+    get_endpoint = getattr(library, 'PaWasapi_GetIMMDevice', None)
+    if get_endpoint is None:
+        return None
+
+    with _com():
+        endpoint = ct.c_void_p()
+        get_endpoint.argtypes = (ct.c_int, ct.POINTER(ct.c_void_p))
+        get_endpoint.restype = ct.c_int
+        if get_endpoint(device_index, ct.byref(endpoint)) != 0 or not endpoint:
+            return None
+        # The already-loaded PortAudio library owns this borrowed IMMDevice.
+        return _endpoint_status(endpoint)
+
+
+def warn_if_selected_input_muted(device_index, device_name, portaudio_library):
+    try:
+        status = wasapi_input_status(device_index, portaudio_library)
+    except OSError:
+        return
+    if status and status.muted:
+        print(f'O microfone selecionado [{device_index}] {device_name} esta silenciado no Windows '
+              f'(volume {status.volume:.0%}). Verifica o botao de silencio em Som > Entrada.', flush=True)
 
 
 def warn_if_default_input_muted():

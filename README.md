@@ -53,7 +53,7 @@ Para verificar os estalos separadamente, usa o teste de microfone. O terminal mo
 .\.venv\Scripts\python.exe main.py --snap-test
 ```
 
-O teste exibe o índice, a interface de captura e os níveis dos canais. No Windows, o programa também consulta o estado de silêncio da entrada de gravação padrão, mesmo que o teste use um dispositivo indicado por índice. Se indicar que está silenciada, ativa o som do microfone em **Definições → Sistema → Som → Entrada**. O volume pode estar acima de zero enquanto a entrada está silenciada.
+O teste exibe o índice, a interface de captura e os níveis dos canais. No Windows, o programa consulta o estado de silêncio da entrada padrão ou da entrada WASAPI selecionada. Se indicar que está silenciada, verifica o botão de silêncio do microfone em **Definições → Sistema → Som → Entrada**. O volume pode estar acima de zero enquanto a entrada está silenciada.
 
 «Sem sinal útil» indica que chegam amostras, mas o nível ficou perto de zero. Fala normalmente no teste. Se os canais continuarem perto de zero, compara com o medidor do Windows, selecionando o mesmo microfone. Se o Windows captar voz, testa outra entrada com `--microphone N` e usa o mesmo índice ao executar o rato. Se a voz aparecer no teste e os estalos subirem abaixo do limiar, experimenta `--snap-sensitivity 1.5`.
 
