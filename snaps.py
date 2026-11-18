@@ -6,6 +6,7 @@ from time import monotonic, sleep
 import numpy as np
 
 MAX_PAIR_GAP = 1.05
+MIN_INPUT_SIGNAL = .0001
 
 
 class SnapPair:
@@ -23,7 +24,6 @@ class SnapPair:
         self.cooldown_until = 0.
         self.status = 'a ouvir'
         self.status_count = 0
-        self.peak = 0.
         self.gate = .012 / self.sensitivity
 
     def report(self, status):
@@ -37,7 +37,6 @@ class SnapPair:
         self.elapsed += duration
         peak = float(np.max(np.abs(samples)))
         rms = float(np.sqrt(np.mean(samples**2)))
-        self.peak = max(peak, self.peak*.98)
         self.gate = max(.012, self.noise*7) / self.sensitivity
         loud = peak >= self.gate and rms >= self.noise*2.4
         target_noise = min(rms, self.noise*2, .025)
@@ -89,6 +88,8 @@ class SnapListener:
         except sd.PortAudioError as error:
             raise RuntimeError(f'Microfone indisponivel: {error}') from error
         self.device_name = info['name']
+        self.host_name = sd.query_hostapis(info['hostapi'])['name']
+        self.device_index = info['index']
         rate = info['default_samplerate']
         if rate < 8000:
             raise ValueError('Microphone sample rate must be at least 8 kHz')
@@ -98,24 +99,44 @@ class SnapListener:
         self.interruptions = 0
         self.toggles = Queue(maxsize=1)
         self.stopped = Event()
-        self.stream = None
+        # Several Windows endpoints expose two channels with signal on only one.
+        self.channels = min(2, info['max_input_channels'])
         try:
-            self.stream = sd.InputStream(device=device, channels=1, dtype='float32',
-                                         samplerate=rate, blocksize=round(rate/100),
-                                         callback=self._capture)
-            self.stream.start()
+            try:
+                self.stream = self._open_stream(sd, rate)
+            except sd.PortAudioError:
+                if self.channels == 1:
+                    raise
+                self.channels = 1
+                self.stream = self._open_stream(sd, rate)
         except sd.PortAudioError as error:
-            if self.stream is not None:
-                self.stream.close()
             raise RuntimeError(f'Nao foi possivel iniciar o microfone {self.device_name}: {error}') from error
+        self.signal_started = monotonic()
+        self.last_signal = None
+        self.channel_peaks = (0.,) * self.channels
+        self.processed_frames = 0
         self.worker = Thread(target=self._detect, name='SnapDetector', daemon=True)
         self.worker.start()
+
+    def _open_stream(self, sd, rate):
+        stream = sd.InputStream(device=self.device_index, channels=self.channels, dtype='float32',
+                                samplerate=rate, blocksize=round(rate/100), callback=self._capture)
+        try:
+            stream.start()
+        except sd.PortAudioError:
+            stream.close()
+            raise
+        return stream
+
+    @property
+    def description(self):
+        return f'{self.device_name} [{self.device_index}, {self.host_name}, {self.channels} canal(is)]'
 
     def _capture(self, data, frames, timestamp, status):
         if status:
             self.discontinuity.set()
         try:
-            self.blocks.put_nowait(data[:, 0].copy())
+            self.blocks.put_nowait(data.copy())
         except Full:
             self.discontinuity.set()
 
@@ -135,11 +156,22 @@ class SnapListener:
                     except Empty:
                         break
                 continue
-            if self.detector.feed(block):
+            if self._feed_block(block):
                 try:
                     self.toggles.put_nowait(monotonic())
                 except Full:
                     pass
+
+    def _feed_block(self, block):
+        peaks = np.max(np.abs(block), axis=0)
+        self.channel_peaks = tuple(max(float(peak), previous * .98)
+                                   for peak, previous in zip(peaks, self.channel_peaks))
+        self.processed_frames += len(block)
+        channel = int(np.argmax(peaks))
+        if peaks[channel] > MIN_INPUT_SIGNAL:
+            self.last_signal = monotonic()
+        # Selecting a channel preserves an impulse that averaging could attenuate.
+        return self.detector.feed(block[:, channel])
 
     def poll(self):
         try:
@@ -149,8 +181,12 @@ class SnapListener:
 
     def meter(self):
         detector = self.detector
-        return (f'nivel {detector.peak:.4f} | limiar {detector.gate:.4f} | '
-                f'{detector.status} | interrupcoes {self.interruptions}')
+        levels = '/'.join(f'{peak:.5f}' for peak in self.channel_peaks)
+        status = detector.status
+        reference = self.last_signal if self.last_signal is not None else self.signal_started
+        if monotonic() - reference >= 2.:
+            status = 'sem sinal util' if self.processed_frames else 'sem amostras'
+        return f'canais {levels} | limiar {detector.gate:.4f} | {status} | interrupcoes {self.interruptions}'
 
     def close(self):
         self.stopped.set()
@@ -163,7 +199,7 @@ class SnapListener:
 def test_microphone(device, sensitivity):
     listener = SnapListener(device, sensitivity)
     try:
-        print(f'Microfone: {listener.device_name}')
+        print(f'Microfone: {listener.description}')
         print('Faz pares de estalos. Ctrl+C encerra. A camera fica livre.', flush=True)
         next_meter = 0.
         status = None

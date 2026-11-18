@@ -53,7 +53,7 @@ Para verificar os estalos separadamente, usa o teste de microfone. O terminal mo
 .\.venv\Scripts\python.exe main.py --snap-test
 ```
 
-Se o nível ficar em zero ao estalar, verifica o microfone selecionado ou escolhe outro com `--microphone N`. Se o nível subir e ficar abaixo do limiar, experimenta `--snap-sensitivity 1.5` no teste e depois no comando de execução.
+O teste exibe o índice, a interface de captura e os níveis dos canais. «Sem sinal útil» indica que chegam amostras, mas o nível ficou perto de zero. Fala normalmente no teste. Se os canais continuarem perto de zero, compara com o medidor em **Definições → Sistema → Som → Entrada**, selecionando o mesmo microfone. Se o Windows captar voz, testa outra entrada com `--microphone N` e usa o mesmo índice ao executar o rato. Se a voz aparecer no teste e os estalos subirem abaixo do limiar, experimenta `--snap-sensitivity 1.5`.
 
 **F8** e **Espaço** na janela fazem a mesma alternância. **F9** fecha o programa e liberta também o microfone. Retira `--start-standby` para abrir a câmara logo no arranque. Usa `--snap-sensitivity 1.5` se os teus estalos não forem apanhados, ou `--snap-sensitivity 0.8` se houver ativações indevidas. O detetor reage a impulsos acústicos curtos e agudos, pelo que outros ruídos semelhantes também podem ativá-lo. Para escolher outro microfone, lista os dispositivos com `.\.venv\Scripts\python.exe -m sounddevice` e passa o índice com `--microphone N`.
 

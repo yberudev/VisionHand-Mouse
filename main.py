@@ -190,7 +190,7 @@ def main():
             try:
                 from snaps import SnapListener
                 listener = SnapListener(args.microphone, args.snap_sensitivity)
-                print(f'Microfone ativo: {listener.device_name}. Dois estalos alternam o controlo.', flush=True)
+                print(f'Microfone ativo: {listener.description}. Dois estalos alternam o controlo.', flush=True)
             except (ImportError, OSError, RuntimeError, ValueError) as error:
                 print(f'Detecao de estalos indisponivel: {error}. Usa F8 ou Espaco.', flush=True)
         print('Windows: F8 ativa/desativa | F9 sai. Na janela: Espaco alterna | Q/ESC sai.', flush=True)
