@@ -1,5 +1,6 @@
 import unittest
 from time import monotonic
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 try:
@@ -10,6 +11,31 @@ except ImportError:
 
 @unittest.skipIf(np is None, 'NumPy is required by the snap detector')
 class SnapTests(unittest.TestCase):
+    def test_raw_mode_uses_wasapi_alias_of_default_microphone(self):
+        from snaps import microphone_info
+
+        mme = dict(index=1, name='Mic', hostapi=0, max_input_channels=2)
+        wasapi = dict(index=9, name='Mic', hostapi=1, max_input_channels=2)
+        another = dict(index=8, name='Other', hostapi=1, max_input_channels=2)
+        sd = Mock()
+        sd.query_devices.side_effect = lambda *args: mme if args else [another, wasapi]
+        sd.query_hostapis.side_effect = lambda index: {'name': ('MME', 'Windows WASAPI')[index]}
+        self.assertEqual(microphone_info(sd, None, 'raw'), (wasapi, 'Windows WASAPI'))
+        with self.assertRaisesRegex(ValueError, 'WASAPI'):
+            microphone_info(sd, 1, 'raw')
+
+    def test_capture_modes_set_only_their_portaudio_fields(self):
+        from snaps import microphone_settings
+
+        sd = Mock()
+        sd.WasapiSettings.side_effect = lambda: SimpleNamespace(
+            _streaminfo=SimpleNamespace(streamOption=0, streamCategory=0))
+        self.assertIsNone(microphone_settings(sd, 'default'))
+        raw = microphone_settings(sd, 'raw')._streaminfo
+        voice = microphone_settings(sd, 'communications')._streaminfo
+        self.assertEqual((raw.streamOption, raw.streamCategory), (1, 0))
+        self.assertEqual((voice.streamOption, voice.streamCategory), (0, 3))
+
     def make_listener(self):
         from snaps import SnapListener
 
@@ -19,6 +45,7 @@ class SnapTests(unittest.TestCase):
         listener.last_signal = None
         listener.channel_peaks = (0., 0.)
         listener.processed_frames = 0
+        listener.max_signal = 0.
         listener.interruptions = 0
         return listener
 

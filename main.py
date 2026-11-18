@@ -32,6 +32,8 @@ def arguments():
     parser.add_argument('--snap-test', action='store_true', help='Test microphone and snap detection without opening the camera')
     parser.add_argument('--start-standby', action='store_true', help='Start with the camera released')
     parser.add_argument('--microphone', type=int, help='Sounddevice input device index for --snap-toggle')
+    parser.add_argument('--microphone-mode', choices=('default', 'raw', 'communications', 'compare'),
+                        default='default', help='Windows WASAPI capture mode or compare with --snap-test')
     parser.add_argument('--snap-sensitivity', type=float, default=1.0, help='Snap sensitivity from 0.5 to 3.0')
     parser.add_argument('--mirror', action='store_true')
     parser.add_argument('--config', default='calibration.json')
@@ -47,6 +49,8 @@ def arguments():
         parser.error('--record-landmarks requires --log')
     if not .5 <= args.snap_sensitivity <= 3.0:
         parser.error('--snap-sensitivity must be between 0.5 and 3.0')
+    if args.microphone_mode == 'compare' and not args.snap_test:
+        parser.error('--microphone-mode compare requires --snap-test')
     return args
 
 
@@ -78,8 +82,11 @@ def main():
     args = arguments()
     if args.snap_test:
         try:
-            from snaps import test_microphone
-            test_microphone(args.microphone, args.snap_sensitivity)
+            from snaps import compare_microphone_modes, test_microphone
+            if args.microphone_mode == 'compare':
+                compare_microphone_modes(args.microphone, args.snap_sensitivity)
+            else:
+                test_microphone(args.microphone, args.snap_sensitivity, args.microphone_mode)
         except (ImportError, OSError, RuntimeError, ValueError) as error:
             raise SystemExit(f'Teste de estalos indisponivel: {error}')
         return
@@ -189,7 +196,7 @@ def main():
         if args.snap_toggle:
             try:
                 from snaps import SnapListener
-                listener = SnapListener(args.microphone, args.snap_sensitivity)
+                listener = SnapListener(args.microphone, args.snap_sensitivity, args.microphone_mode)
                 print(f'Microfone ativo: {listener.description}. Dois estalos alternam o controlo.', flush=True)
             except (ImportError, OSError, RuntimeError, ValueError) as error:
                 print(f'Detecao de estalos indisponivel: {error}. Usa F8 ou Espaco.', flush=True)

@@ -55,6 +55,14 @@ Para verificar os estalos separadamente, usa o teste de microfone. O terminal mo
 
 O teste exibe o índice, a interface de captura e os níveis dos canais. «Sem sinal útil» indica que chegam amostras, mas o nível ficou perto de zero. Fala normalmente no teste. Se os canais continuarem perto de zero, compara com o medidor em **Definições → Sistema → Som → Entrada**, selecionando o mesmo microfone. Se o Windows captar voz, testa outra entrada com `--microphone N` e usa o mesmo índice ao executar o rato. Se a voz aparecer no teste e os estalos subirem abaixo do limiar, experimenta `--snap-sensitivity 1.5`.
 
+Se o Windows captar voz nesse microfone e a aplicação continuar em zero, compara os modos da entrada WASAPI. Usa o índice marcado como **Windows WASAPI** na lista de dispositivos e fala durante os três testes de três segundos.
+
+```powershell
+.\.venv\Scripts\python.exe main.py --snap-test --microphone 9 --microphone-mode compare
+```
+
+O modo `raw` solicita ao Windows captura sem processamento adaptativo, quando suportada pelo controlador. `communications` usa a categoria de chamadas. Ambos usam captura partilhada. Se a comparação indicar um modo com sinal, acrescenta o índice e o modo indicados ao comando do rato. Para confirmar os estalos antes disso, usa `--snap-test` com essas mesmas opções. A comparação só mede picos, sem gravar áudio.
+
 **F8** e **Espaço** na janela fazem a mesma alternância. **F9** fecha o programa e liberta também o microfone. Retira `--start-standby` para abrir a câmara logo no arranque. Usa `--snap-sensitivity 1.5` se os teus estalos não forem apanhados, ou `--snap-sensitivity 0.8` se houver ativações indevidas. O detetor reage a impulsos acústicos curtos e agudos, pelo que outros ruídos semelhantes também podem ativá-lo. Para escolher outro microfone, lista os dispositivos com `.\.venv\Scripts\python.exe -m sounddevice` e passa o índice com `--microphone N`.
 
 ## Gestos

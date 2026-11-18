@@ -7,6 +7,39 @@ import numpy as np
 
 MAX_PAIR_GAP = 1.05
 MIN_INPUT_SIGNAL = .0001
+MICROPHONE_MODES = ('default', 'raw', 'communications')
+
+
+def microphone_info(sd, device, mode):
+    info = sd.query_devices(device, 'input')
+    host = sd.query_hostapis(info['hostapi'])['name']
+    if mode != 'default' and host != 'Windows WASAPI' and device is None:
+        matching = (item for item in sd.query_devices()
+                    if item['name'] == info['name'] and item['max_input_channels'] > 0
+                    and sd.query_hostapis(item['hostapi'])['name'] == 'Windows WASAPI')
+        info = next(matching, info)
+        host = sd.query_hostapis(info['hostapi'])['name']
+    if mode != 'default' and host != 'Windows WASAPI':
+        raise ValueError('Este modo requer uma entrada Windows WASAPI. Escolhe o indice com --microphone.')
+    return info, host
+
+
+def microphone_settings(sd, mode):
+    if mode == 'default':
+        return None
+    settings = sd.WasapiSettings()
+    # python-sounddevice exposes the PortAudio structure but its constructor
+    # does not expose these fields. They affect only this shared capture stream.
+    stream_info = getattr(settings, '_streaminfo', None)
+    if not all(hasattr(stream_info, field) for field in ('streamOption', 'streamCategory')):
+        raise ValueError('Esta versao de sounddevice nao disponibiliza modos WASAPI adicionais.')
+    if mode == 'raw':
+        stream_info.streamOption = 1  # eStreamOptionRaw
+    elif mode == 'communications':
+        stream_info.streamCategory = 3  # eAudioCategoryCommunications
+    else:
+        raise ValueError(f'Modo de microfone desconhecido: {mode}')
+    return settings
 
 
 class SnapPair:
@@ -80,16 +113,17 @@ class SnapPair:
 
 
 class SnapListener:
-    def __init__(self, device=None, sensitivity=1.0):
+    def __init__(self, device=None, sensitivity=1.0, mode='default'):
         import sounddevice as sd
 
         try:
-            info = sd.query_devices(device, 'input')
+            info, self.host_name = microphone_info(sd, device, mode)
         except sd.PortAudioError as error:
             raise RuntimeError(f'Microfone indisponivel: {error}') from error
         self.device_name = info['name']
-        self.host_name = sd.query_hostapis(info['hostapi'])['name']
         self.device_index = info['index']
+        self.mode = mode
+        self.extra_settings = microphone_settings(sd, mode)
         rate = info['default_samplerate']
         if rate < 8000:
             raise ValueError('Microphone sample rate must be at least 8 kHz')
@@ -114,13 +148,15 @@ class SnapListener:
         self.signal_started = monotonic()
         self.last_signal = None
         self.channel_peaks = (0.,) * self.channels
+        self.max_signal = 0.
         self.processed_frames = 0
         self.worker = Thread(target=self._detect, name='SnapDetector', daemon=True)
         self.worker.start()
 
     def _open_stream(self, sd, rate):
         stream = sd.InputStream(device=self.device_index, channels=self.channels, dtype='float32',
-                                samplerate=rate, blocksize=round(rate/100), callback=self._capture)
+                                samplerate=rate, blocksize=round(rate/100), callback=self._capture,
+                                extra_settings=self.extra_settings)
         try:
             stream.start()
         except sd.PortAudioError:
@@ -130,7 +166,8 @@ class SnapListener:
 
     @property
     def description(self):
-        return f'{self.device_name} [{self.device_index}, {self.host_name}, {self.channels} canal(is)]'
+        return (f'{self.device_name} [{self.device_index}, {self.host_name}, '
+                f'{self.channels} canal(is), modo {self.mode}]')
 
     def _capture(self, data, frames, timestamp, status):
         if status:
@@ -168,6 +205,7 @@ class SnapListener:
                                    for peak, previous in zip(peaks, self.channel_peaks))
         self.processed_frames += len(block)
         channel = int(np.argmax(peaks))
+        self.max_signal = max(self.max_signal, float(peaks[channel]))
         if peaks[channel] > MIN_INPUT_SIGNAL:
             self.last_signal = monotonic()
         # Selecting a channel preserves an impulse that averaging could attenuate.
@@ -196,8 +234,8 @@ class SnapListener:
             self.worker.join(timeout=1)
 
 
-def test_microphone(device, sensitivity):
-    listener = SnapListener(device, sensitivity)
+def test_microphone(device, sensitivity, mode='default'):
+    listener = SnapListener(device, sensitivity, mode)
     try:
         print(f'Microfone: {listener.description}')
         print('Faz pares de estalos. Ctrl+C encerra. A camera fica livre.', flush=True)
@@ -216,3 +254,32 @@ def test_microphone(device, sensitivity):
         pass
     finally:
         listener.close()
+
+
+def compare_microphone_modes(device, sensitivity):
+    """Measure levels on short, consecutive capture streams. No audio is saved."""
+    print('Fala continuamente durante os testes. A camera fica livre. Ctrl+C cancela.', flush=True)
+    choices = []
+    try:
+        for mode in MICROPHONE_MODES:
+            try:
+                listener = SnapListener(device, sensitivity, mode)
+            except (ValueError, RuntimeError) as error:
+                print(f'{mode}: {error}', flush=True)
+                continue
+            try:
+                print(f'A ouvir por 3 segundos: {listener.description}', flush=True)
+                sleep(3)
+                peak = listener.max_signal
+                if peak > MIN_INPUT_SIGNAL:
+                    choices.append((peak, listener.device_index, mode))
+                print(f'  Pico {peak:.5f} | {listener.processed_frames} amostras por canal', flush=True)
+            finally:
+                listener.close()
+    except KeyboardInterrupt:
+        return
+    if choices:
+        _, index, mode = max(choices)
+        print(f'Maior sinal: --microphone {index} --microphone-mode {mode}', flush=True)
+    else:
+        print('Nenhum modo recebeu sinal acima do nivel residual.', flush=True)
