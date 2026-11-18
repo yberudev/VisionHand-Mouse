@@ -80,6 +80,9 @@ def configure(args):
 
 def main():
     args = arguments()
+    if args.snap_test or (args.snap_toggle and not args.calibrate):
+        from windows_audio import warn_if_default_input_muted
+        warn_if_default_input_muted()
     if args.snap_test:
         try:
             from snaps import compare_microphone_modes, test_microphone
