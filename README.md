@@ -36,6 +36,19 @@ Foi verificada a integração em Python 3.14.10 / Windows com MediaPipe 0.10.35,
 
 **Windows, em qualquer aplicação no desktop normal: `F8` pausa/retoma e `F9` encerra.** Na janela de pré-visualização: `Q`/`ESC`: sair; `Espaço`: desativar/reativar; `D`: diagnóstico; `S`: guardar configuração; `H`: mostrar/ocultar o esqueleto da mão (visível por padrão). O painel lateral destaca o gesto detetado e apresenta o estado de cada ação, sem tapar a imagem da mão. O failsafe dos cantos está ativo por padrão e pode ser desativado com `--no-failsafe`. A limpeza liberta os botões pertencentes à aplicação mesmo após esse failsafe. Uma falha do próprio backend/SO pode impedir a libertação: a aplicação tenta ambos os botões e propaga o erro.
 
+## Ativar e desativar com dois estalos
+
+Instala as dependências atualizadas e inicia o programa em modo de espera para deixar a câmara livre até ao primeiro par de estalos.
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe main.py --mirror --live --backend native --no-failsafe --config calibration.fist.json --snap-toggle --start-standby
+```
+
+Faz dois estalos com cerca de **140 a 700 ms** de intervalo. Um par abre a câmara e o seguinte liberta a câmara e os botões do rato. Mostra a mão aberta após reativar. O microfone continua ativo em modo de espera e o áudio é processado em memória, sem gravação ou transmissão. Se a câmara estiver ocupada quando tentares reativar, o programa fica em espera para poderes tentar de novo.
+
+**F8** e **Espaço** na janela fazem a mesma alternância. **F9** fecha o programa e liberta também o microfone. Retira `--start-standby` para abrir a câmara logo no arranque. Usa `--snap-sensitivity 1.5` se os teus estalos não forem apanhados, ou `--snap-sensitivity 0.8` se houver ativações indevidas. O detetor reage a impulsos acústicos curtos e agudos, pelo que outros ruídos semelhantes também podem ativá-lo. Para escolher outro microfone, lista os dispositivos com `.\.venv\Scripts\python.exe -m sounddevice` e passa o índice com `--microphone N`.
+
 ## Gestos
 
 | Gesto | Ação |

@@ -3,7 +3,7 @@ import argparse
 import os
 from dataclasses import fields
 from pathlib import Path
-from time import monotonic, perf_counter
+from time import monotonic, perf_counter, sleep
 from config import Config
 from controller import Controller
 from backends import create_backend
@@ -28,6 +28,10 @@ def arguments():
                         help='Experiment: fist left-click/hold, folded thumb pause, open hand movement')
     parser.add_argument('--model', default=str(Path(__file__).parent / 'models/hand_landmarker.task'))
     parser.add_argument('--camera', type=int, default=0)
+    parser.add_argument('--snap-toggle', action='store_true', help='Toggle camera and mouse with two finger snaps')
+    parser.add_argument('--start-standby', action='store_true', help='Start with the camera released')
+    parser.add_argument('--microphone', type=int, help='Sounddevice input device index for --snap-toggle')
+    parser.add_argument('--snap-sensitivity', type=float, default=1.0, help='Snap sensitivity from 0.5 to 3.0')
     parser.add_argument('--mirror', action='store_true')
     parser.add_argument('--config', default='calibration.json')
     parser.add_argument('--calibrate', action='store_true', help='Edit and save calibration, then exit')
@@ -40,6 +44,8 @@ def arguments():
     args = parser.parse_args()
     if args.record_landmarks and not args.log:
         parser.error('--record-landmarks requires --log')
+    if not .5 <= args.snap_sensitivity <= 3.0:
+        parser.error('--snap-sensitivity must be between 0.5 and 3.0')
     return args
 
 
@@ -83,13 +89,16 @@ def main():
     controller = Controller(cfg)
     backend = create_backend(cfg, args.live, not args.no_failsafe, args.backend)
     diagnostics = Diagnostics(args.log,record_landmarks=args.record_landmarks)
-    camera = None
     capture = None
+    listener = None
     window = None
     hud = None
     hud_error = None
     hotkeys = GlobalHotkeys()
     show_skeleton = True
+    sequence, last_timestamp, previous_infer = 0, -1, None
+    standby_text = 'CAMERA LIBERADA'
+    standby_refresh = 0.
 
     def update_hud(active):
         nonlocal hud, hud_error
@@ -102,11 +111,53 @@ def main():
                 hud.close()
                 hud = None
 
+    def deactivate(message='CAMERA LIBERADA'):
+        nonlocal capture, standby_refresh, standby_text
+        controller.enabled = False
+        controller.stop(reason='standby')
+        controller.observation = None
+        update_hud(False)
+        standby_refresh = 0.
+        standby_text = message
+        try:
+            backend.release_all()
+        finally:
+            if capture is not None:
+                closing, capture = capture, None
+                closing.close()
+
+    def activate():
+        nonlocal capture, sequence, previous_infer, standby_text, standby_refresh
+        camera = cv2.VideoCapture(args.camera)
+        try:
+            if not camera.isOpened():
+                standby_text = f'CAMERA {args.camera} INDISPONIVEL'
+                standby_refresh = 0.
+                print(f'{standby_text}. Fecha a aplicacao que a usa e tenta novamente.', flush=True)
+                return
+            camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            capture = Capture(camera)
+        finally:
+            if capture is None:
+                camera.release()
+        sequence, previous_infer = 0, None
+        controller.last_t = None
+        controller.enabled = True
+        print('Controlo ativo. Mostra a mao aberta para comecar.', flush=True)
+
     def handle_keys():
         nonlocal show_skeleton
         keys = hotkeys.poll() + (window.poll() if window else [])
         if any(key in (ord('q'), 27) for key in keys):
             return False
+        snap = listener is not None and listener.poll()
+        if snap or ord(' ') in keys:
+            if capture is None:
+                activate()
+            else:
+                deactivate()
+                print('Modo de espera. Camera liberada.', flush=True)
         for key in keys:
             if key == ord('d'):
                 args.diagnostics = not args.diagnostics
@@ -114,11 +165,6 @@ def main():
                 show_skeleton = not show_skeleton
             elif key == ord('s'):
                 cfg.save(args.config)
-            elif key == ord(' '):
-                controller.enabled = not controller.enabled
-                backend.emit(controller.stop())
-                backend.release_all()
-                update_hud(False)
         return True
 
     try:
@@ -130,33 +176,48 @@ def main():
                 print(f'HUD disabled: {error}', flush=True)
         if not args.no_preview:
             window = PreviewWindow()
-        print('Windows: F8 pause/resume | F9 exit (global). Preview: SPACE pause | Q/ESC exit.', flush=True)
+        if args.snap_toggle:
+            try:
+                from snaps import SnapListener
+                listener = SnapListener(args.microphone, args.snap_sensitivity)
+                print('Microfone ativo. Dois estalos alternam o controlo.', flush=True)
+            except (ImportError, OSError, RuntimeError, ValueError) as error:
+                print(f'Detecao de estalos indisponivel: {error}. Usa F8 ou Espaco.', flush=True)
+        print('Windows: F8 ativa/desativa | F9 sai. Na janela: Espaco alterna | Q/ESC sai.', flush=True)
         vision = mp.tasks.vision
         options = vision.HandLandmarkerOptions(
             base_options=mp.tasks.BaseOptions(model_asset_path=args.model),
             running_mode=vision.RunningMode.VIDEO, num_hands=1,
             min_hand_detection_confidence=.65, min_hand_presence_confidence=.65,
             min_tracking_confidence=.6)
-        camera = cv2.VideoCapture(args.camera)
-        if not camera.isOpened():
-            raise RuntimeError('Could not open camera')
-        camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        capture = Capture(camera)
-        sequence, last_timestamp, previous_infer = 0, -1, None
+        controller.enabled = False
+        if not args.start_standby:
+            activate()
         with vision.HandLandmarker.create_from_options(options) as landmarker:
             while True:
                 if not handle_keys():
                     break
+                if capture is None:
+                    now = monotonic()
+                    if window and now >= standby_refresh:
+                        standby = np.zeros((480, 640, 3), dtype=np.uint8)
+                        cv2.putText(standby, standby_text, (26, 100), cv2.FONT_HERSHEY_SIMPLEX,
+                                    .95, (85, 245, 145), 2, cv2.LINE_AA)
+                        keys = 'Dois estalos, F8 ou Espaco para ativar' if listener else 'F8 ou Espaco para ativar'
+                        cv2.putText(standby, keys, (26, 145), cv2.FONT_HERSHEY_SIMPLEX,
+                                    .66, (210, 215, 220), 1, cv2.LINE_AA)
+                        window.publish(gesture_panel(standby, controller, cv2))
+                        standby_refresh = now + .25
+                    sleep(.025)
+                    continue
                 sample = capture.read(sequence)
                 if sample is None:
                     backend.emit(controller.stop(lost=True))
                     backend.release_all()
                     update_hud(False)
                     if capture.failed:
-                        if capture.error:
-                            raise capture.error
-                        break
+                        print(f'Captura interrompida: {capture.error or "sem frames"}. Tenta reativar.', flush=True)
+                        deactivate('CAPTURA INTERROMPIDA')
                     continue
                 sequence, (frame, captured_at) = sample
                 start = perf_counter()
@@ -231,14 +292,11 @@ def main():
     finally:
         # Always release owned buttons even if recognition, dispatch or logging fails.
         try:
-            controller.stop()
-            backend.release_all()
+            deactivate()
         finally:
             try:
-                if capture:
-                    capture.close()
-                elif camera is not None:
-                    camera.release()
+                if listener:
+                    listener.close()
             finally:
                 try:
                     if window:
