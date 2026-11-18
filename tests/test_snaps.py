@@ -8,7 +8,7 @@ except ImportError:
 
 @unittest.skipIf(np is None, 'NumPy is required by the snap detector')
 class SnapTests(unittest.TestCase):
-    def run_audio(self, onsets, background=None, rate=44100):
+    def run_audio(self, onsets, background=None, rate=44100, amplitude=.85, softened=False):
         from snaps import SnapPair
 
         audio = np.zeros(rate*4, dtype=np.float32) if background is None else background.copy()
@@ -17,8 +17,10 @@ class SnapTests(unittest.TestCase):
             start = round(time*rate)
             # Short broadband burst with a decaying envelope and mixed signs.
             length = round(rate*.004)
-            audio[start:start+length] += .85 * rng.choice((-1., 1.), length) * np.exp(
-                -np.arange(length)/(rate*.0008))
+            burst = rng.choice((-1., 1.), length) * np.exp(-np.arange(length)/(rate*.0008))
+            if softened:
+                burst = np.convolve(burst, np.ones(5)/5, mode='same')
+            audio[start:start+length] += amplitude * burst
         detector = SnapPair(rate)
         block = rate//100
         return [i/rate for i in range(0, len(audio), block)
@@ -33,9 +35,16 @@ class SnapTests(unittest.TestCase):
                 self.assertTrue(2.4 < toggles[1] < 2.48)
 
     def test_single_and_out_of_window_snaps_do_not_toggle(self):
-        for onsets in ((.4,), (.4, .47), (.4, 1.3)):
+        for onsets in ((.4,), (.4, .47), (.4, 1.6)):
             with self.subTest(onsets=onsets):
                 self.assertEqual(self.run_audio(onsets), [])
+
+    def test_quiet_softened_snaps_at_a_slower_cadence(self):
+        rate = 44100
+        background = np.random.default_rng(42).normal(0., .001, rate*4)
+        toggles = self.run_audio((.405, 1.285), background, rate, amplitude=.034, softened=True)
+        self.assertEqual(len(toggles), 1)
+        self.assertTrue(1.285 < toggles[0] < 1.35)
 
     def test_low_frequency_bursts_and_background_noise_do_not_toggle(self):
         rate = 44100

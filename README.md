@@ -45,7 +45,15 @@ Instala as dependências atualizadas e inicia o programa em modo de espera para 
 .\.venv\Scripts\python.exe main.py --mirror --live --backend native --no-failsafe --config calibration.fist.json --snap-toggle --start-standby
 ```
 
-Faz dois estalos com cerca de **140 a 700 ms** de intervalo. Um par abre a câmara e o seguinte liberta a câmara e os botões do rato. Mostra a mão aberta após reativar. O microfone continua ativo em modo de espera e o áudio é processado em memória, sem gravação ou transmissão. Se a câmara estiver ocupada quando tentares reativar, o programa fica em espera para poderes tentar de novo.
+Faz dois estalos com cerca de **140 ms a 1 segundo** de intervalo. Um par abre a câmara e o seguinte liberta a câmara e os botões do rato. Mostra a mão aberta após reativar. O microfone continua ativo em modo de espera e o áudio é processado em memória, sem gravação ou transmissão. Se a câmara estiver ocupada quando tentares reativar, o programa fica em espera para poderes tentar de novo.
+
+Para verificar os estalos separadamente, usa o teste de microfone. O terminal mostra o dispositivo, o nível recebido, o limiar e a confirmação do par. **Ctrl+C** encerra o teste.
+
+```powershell
+.\.venv\Scripts\python.exe main.py --snap-test
+```
+
+Se o nível ficar em zero ao estalar, verifica o microfone selecionado ou escolhe outro com `--microphone N`. Se o nível subir e ficar abaixo do limiar, experimenta `--snap-sensitivity 1.5` no teste e depois no comando de execução.
 
 **F8** e **Espaço** na janela fazem a mesma alternância. **F9** fecha o programa e liberta também o microfone. Retira `--start-standby` para abrir a câmara logo no arranque. Usa `--snap-sensitivity 1.5` se os teus estalos não forem apanhados, ou `--snap-sensitivity 0.8` se houver ativações indevidas. O detetor reage a impulsos acústicos curtos e agudos, pelo que outros ruídos semelhantes também podem ativá-lo. Para escolher outro microfone, lista os dispositivos com `.\.venv\Scripts\python.exe -m sounddevice` e passa o índice com `--microphone N`.
 

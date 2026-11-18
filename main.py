@@ -29,6 +29,7 @@ def arguments():
     parser.add_argument('--model', default=str(Path(__file__).parent / 'models/hand_landmarker.task'))
     parser.add_argument('--camera', type=int, default=0)
     parser.add_argument('--snap-toggle', action='store_true', help='Toggle camera and mouse with two finger snaps')
+    parser.add_argument('--snap-test', action='store_true', help='Test microphone and snap detection without opening the camera')
     parser.add_argument('--start-standby', action='store_true', help='Start with the camera released')
     parser.add_argument('--microphone', type=int, help='Sounddevice input device index for --snap-toggle')
     parser.add_argument('--snap-sensitivity', type=float, default=1.0, help='Snap sensitivity from 0.5 to 3.0')
@@ -75,6 +76,13 @@ def configure(args):
 
 def main():
     args = arguments()
+    if args.snap_test:
+        try:
+            from snaps import test_microphone
+            test_microphone(args.microphone, args.snap_sensitivity)
+        except (ImportError, OSError, RuntimeError, ValueError) as error:
+            raise SystemExit(f'Teste de estalos indisponivel: {error}')
+        return
     try:
         cfg = configure(args)
     except (ValueError, TypeError) as error:
@@ -152,6 +160,8 @@ def main():
         if any(key in (ord('q'), 27) for key in keys):
             return False
         snap = listener is not None and listener.poll()
+        if snap:
+            print('Par de estalos detetado.', flush=True)
         if snap or ord(' ') in keys:
             if capture is None:
                 activate()
@@ -180,7 +190,7 @@ def main():
             try:
                 from snaps import SnapListener
                 listener = SnapListener(args.microphone, args.snap_sensitivity)
-                print('Microfone ativo. Dois estalos alternam o controlo.', flush=True)
+                print(f'Microfone ativo: {listener.device_name}. Dois estalos alternam o controlo.', flush=True)
             except (ImportError, OSError, RuntimeError, ValueError) as error:
                 print(f'Detecao de estalos indisponivel: {error}. Usa F8 ou Espaco.', flush=True)
         print('Windows: F8 ativa/desativa | F9 sai. Na janela: Espaco alterna | Q/ESC sai.', flush=True)
@@ -206,6 +216,9 @@ def main():
                         keys = 'Dois estalos, F8 ou Espaco para ativar' if listener else 'F8 ou Espaco para ativar'
                         cv2.putText(standby, keys, (26, 145), cv2.FONT_HERSHEY_SIMPLEX,
                                     .66, (210, 215, 220), 1, cv2.LINE_AA)
+                        if listener:
+                            cv2.putText(standby, listener.meter(), (26, 185), cv2.FONT_HERSHEY_SIMPLEX,
+                                        .48, (150, 220, 185), 1, cv2.LINE_AA)
                         window.publish(gesture_panel(standby, controller, cv2))
                         standby_refresh = now + .25
                     sleep(.025)
