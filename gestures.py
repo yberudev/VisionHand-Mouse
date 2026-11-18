@@ -36,17 +36,21 @@ class Observation:
     features: dict = field(default_factory=dict)
 
 
+@dataclass
+class PoseHistory:
+    extended: list = field(default_factory=lambda: [False] * 5)
+    pinching: bool = False
+    was_fist: bool = False
+
+
 class Classifier:
     def __init__(self, cfg=None):
         self.cfg = cfg or Config()
-        self.extended = [False] * 5
-        self.pinching = False
-        self.was_fist = False
+        self.reset()
 
     def reset(self):
-        self.extended = [False] * 5
-        self.pinching = False
-        self.was_fist = False
+        self.image_history = PoseHistory()
+        self.world_history = PoseHistory()
 
     def classify(self, landmarks, aspect=1., world_landmarks=None):
         if len(landmarks) != 21:
@@ -58,23 +62,40 @@ class Classifier:
         if tracking_scale < .025:
             return None
         center = tuple(sum(p[j][i] for j in (0,5,9,13,17))/5 for i in (0,1))
+        if image_valid:
+            gesture, features = self._classify_pose(p, image_width, tracking_scale, self.image_history)
+        else:
+            gesture, features = Gesture.OTHER, {}
+            self.image_history = PoseHistory()
+        # A normally projected hand should not lose an image pose when the
+        # independently estimated 3D joints disagree. Use 3D for a compressed palm.
+        projected_width = distance(p[5][:2], p[17][:2]) / tracking_scale
         source = 'image'
-        scale, pose_scale = image_width, tracking_scale
-        if world_landmarks is not None and len(world_landmarks) == 21:
+        use_world = not image_valid or projected_width < .60
+        if use_world and world_landmarks is not None and len(world_landmarks) == 21:
             world = [(v.x, v.y, v.z) for v in world_landmarks]
             if all(value is not None and isfinite(value) for point in world for value in point):
                 width, size, valid = palm_geometry(world)
                 if valid:
-                    p, scale, pose_scale, source = world, width, size, 'world'
+                    world_gesture, world_features = self._classify_pose(world, width, size, self.world_history)
+                    if world_gesture != Gesture.OTHER or gesture == Gesture.OTHER:
+                        gesture, features = world_gesture, world_features
+                        source = 'world'
+        if source == 'image':
+            self.world_history = PoseHistory()
         if source == 'image' and not image_valid:
             return None
+        features.update(pose_source=source, projected_palm_width=round(projected_width, 3))
+        return Observation(gesture, center, image_width, 1. if gesture != Gesture.OTHER else 0., tracking_scale, features)
+
+    def _classify_pose(self, p, scale, pose_scale, history):
         palm3 = tuple(sum(p[j][i] for j in (0,5,9,13,17))/5 for i in range(3))
         states = []
         bends, reaches, compactness, closed, validity = [], [], [], [], []
         for n, (mcp,pip,dip,tip) in enumerate(((5,6,7,8),(9,10,11,12),(13,14,15,16),(17,18,19,20)), 1):
             bend = min(angle(p[mcp],p[pip],p[dip]), angle(p[pip],p[dip],p[tip]))
             reach = distance(p[0],p[tip]) / max(distance(p[0],p[pip]), 1e-6)
-            extended = bend > (145 if self.extended[n] else 160) and reach > (1.08 if self.extended[n] else 1.15)
+            extended = bend > (145 if history.extended[n] else 160) and reach > (1.08 if history.extended[n] else 1.15)
             folded = bend < 125 or reach < .98
             bones = [distance(p[a],p[b]) for a,b in ((mcp,pip),(pip,dip),(dip,tip))]
             valid = min(bones) > pose_scale*.025 and .25 < sum(bones)/pose_scale < 3.5
@@ -90,7 +111,7 @@ class Classifier:
             bends.append(round(bend,1)); reaches.append(round(reach,3)); compactness.append(round(tip_palm,3))
             states.append(True if valid and extended else False if valid and folded else None)
             if states[-1] is not None:
-                self.extended[n] = states[-1]
+                history.extended[n] = states[-1]
         thumb_angle = angle(p[1],p[2],p[3])
         thumb_tip_angle = angle(p[2],p[3],p[4])
         spread = distance(p[4],p[5]) / scale
@@ -98,44 +119,43 @@ class Classifier:
         # relatively straight at its joints while resting over the palm.
         lateral = sum((p[4][i]-p[5][i])*(p[17][i]-p[5][i]) for i in range(3)) / (scale*scale)
         opposed = lateral > .05 and distance(p[4],p[0]) < distance(p[5],p[0]) * 1.1
-        thumb = thumb_angle > (140 if self.extended[0] else 155) and thumb_tip_angle > 150 and spread > (.65 if self.extended[0] else .8)
+        thumb = thumb_angle > (140 if history.extended[0] else 155) and thumb_tip_angle > 150 and spread > (.65 if history.extended[0] else .8)
         thumb = thumb and not opposed
         thumb_folded = opposed or spread < .55 or thumb_tip_angle < 125 or thumb_angle < 125
         states.insert(0, True if thumb else False if thumb_folded else None)
         if states[0] is not None:
-            self.extended[0] = states[0]
+            history.extended[0] = states[0]
         # Photo references: thumb folded = left; index folded = right;
         # thumb/index tips touching with the other three fingers up = scroll.
         # Pinch takes priority: bent index in an OK sign is not a right click.
-        pinch_limit = self.cfg.pinch_release if self.pinching else self.cfg.pinch_distance
-        self.pinching = states[2:] == [True, True, True] and distance(p[4], p[8]) / scale < pinch_limit
+        pinch_limit = self.cfg.pinch_release if history.pinching else self.cfg.pinch_distance
+        history.pinching = states[2:] == [True, True, True] and distance(p[4], p[8]) / scale < pinch_limit
         thumb_palm = distance(p[4],palm3)/pose_scale
         # A fist does not require the thumb's joints to match one exact folded
         # pose. It must still lie close to the palm; a thumbs-up is not a fist.
         compact_thumb = thumb_palm < 1.20 and distance(p[4],p[5])/pose_scale < 1.15
         # Retain an already acquired fist through one uncertain (not extended)
         # finger; never use this three-finger rule to enter a new fist.
-        retained = (self.was_fist and all(validity) and sum(closed)>=3 and not any(s is True for s in states[1:])
+        retained = (history.was_fist and all(validity) and sum(closed)>=3 and not any(s is True for s in states[1:])
                     and max(compactness)<1.45)
         relaxed_entry = (all(validity) and sum(closed)>=3 and not any(s is True for s in states[1:])
                          and all(ok or bend<135 and reach<1.0 and radius<1.45
                                  for ok,bend,reach,radius in zip(closed,bends,reaches,compactness)))
         fist = (all(closed) or relaxed_entry or retained) and compact_thumb
-        self.was_fist = fist
+        history.was_fist = fist
         features = dict(finger_states=states[1:], finger_bends=bends, finger_reach=reaches,
                         tip_palm_distances=compactness, fist_closed_fingers=sum(closed),
                         thumb_state=states[0], thumb_spread=round(spread,3),
                         thumb_palm_distance=round(thumb_palm,3), fist_thumb_compact=compact_thumb,
                         fist_retained=bool(fist and retained and not all(closed)),
-                        fist_relaxed_entry=bool(fist and relaxed_entry and not all(closed)),valid_fingers=validity,
-                        pose_source=source)
+                        fist_relaxed_entry=bool(fist and relaxed_entry and not all(closed)),valid_fingers=validity)
         mapping = {(False,True,True,True,True): Gesture.LEFT,
                    (True,False,True,True,True): Gesture.RIGHT,
                    (True,True,True,True,True): Gesture.OPEN}
-        gesture = (Gesture.SCROLL if self.pinching else Gesture.FIST if fist
+        gesture = (Gesture.SCROLL if history.pinching else Gesture.FIST if fist
                    else mapping.get(tuple(states), Gesture.OTHER))
         # Three independent palm spans resist width changes from yaw/noisy MCPs.
-        return Observation(gesture, center, image_width, 1. if gesture != Gesture.OTHER else 0., tracking_scale, features)
+        return gesture, features
 
 
 class Stabilizer:

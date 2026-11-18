@@ -16,7 +16,7 @@ class GeometryTests(unittest.TestCase):
     def test_world_pose_survives_foreshortened_image(self):
         aspect = 4 / 3
         for gesture in Gesture:
-            for yaw in (-75, -40, 40, 75):
+            for yaw in (-75, 75):
                 for size in (.38, 1.):
                     pose = hand(gesture, scale=.2, mirror=yaw < 0)
                     tilt = math.radians(yaw)
@@ -30,6 +30,13 @@ class GeometryTests(unittest.TestCase):
                         self.assertEqual(result.features['pose_source'], 'world')
                         self.assertAlmostEqual(result.center[0], sum(image[j].x*aspect
                                                for j in (0, 5, 9, 13, 17))/5)
+
+    def test_frontal_open_hand_survives_conflicting_world_estimate(self):
+        image = hand(Gesture.OPEN)
+        world = hand(Gesture.OTHER)
+        result = Classifier().classify(image, world_landmarks=world)
+        self.assertEqual(result.gesture, Gesture.OPEN)
+        self.assertEqual(result.features['pose_source'], 'image')
 
     def test_bad_world_geometry_falls_back_to_image(self):
         image = hand(Gesture.OPEN)

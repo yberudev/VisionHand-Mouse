@@ -232,6 +232,6 @@ O painel mostra «Abrir: clique | manter …» durante o pending. O JSONL regist
 
 ### Mão inclinada e visualização à distância
 
-O reconhecimento usa os pontos 3D do MediaPipe para comparar os dedos com a palma. A posição do cursor e o tamanho aparente da mão continuam a vir dos pontos da imagem. Se a geometria da palma em 3D faltar ou for inválida, o reconhecimento usa os pontos da imagem. O diagnóstico indica a fonte usada (`world` ou `image`), e sessões novas com `--record-landmarks` permitem repetir as duas fontes no replay.
+O reconhecimento usa os pontos da imagem como fonte principal. Quando a projeção da palma fica muito estreita ou inválida, o classificador consulta os pontos 3D do MediaPipe. Se o 3D indicar um gesto desconhecido e a imagem reconhecer um gesto, prevalece a imagem. A posição do cursor e o tamanho aparente da mão vêm dos pontos da imagem. O diagnóstico indica a fonte usada (`world` ou `image`), e sessões com `--record-landmarks` permitem repetir as duas fontes no replay.
 
 Quando a mão detetada ocupa pouco espaço, a pré-visualização mostra um recorte ampliado com o esqueleto redesenhado e contornado. O recorte aparece no lado oposto da mão e a tecla **H** alterna ambas as vistas do esqueleto. A ampliação é visual. O alcance de deteção continua a depender dos detalhes que a câmara capta.
