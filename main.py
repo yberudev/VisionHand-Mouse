@@ -25,7 +25,7 @@ def arguments():
     parser.add_argument('--no-preview', action='store_true', help='Run without a preview window; Windows F8 pauses, F9 exits')
     parser.add_argument('--no-hud', action='store_true', help='Disable the green desktop cursor reticle (Windows live mode)')
     parser.add_argument('--fist-click', action='store_true',
-                        help='Experiment: fist left-click/hold, folded thumb pause, open hand movement')
+                        help='Use fist left-click/hold and save this mapping in the selected profile')
     parser.add_argument('--model', default=str(Path(__file__).parent / 'models/hand_landmarker.task'))
     parser.add_argument('--camera', type=int, default=0)
     parser.add_argument('--snap-toggle', action='store_true', help='Toggle camera and mouse with two finger snaps')
@@ -66,6 +66,7 @@ def configure(args):
         if name not in names:
             raise ValueError(f'Unknown parameter: {name}')
         setattr(cfg, name, type(getattr(cfg, name))(value))
+    fist_mapping_changed = args.fist_click and cfg.left_click_gesture != 'FIST'
     if args.fist_click:
         cfg.left_click_gesture = 'FIST'
     if args.calibrate:
@@ -76,7 +77,7 @@ def configure(args):
             if value:
                 setattr(cfg, name, type(current)(value))
     cfg.validate()
-    if args.calibrate or args.save_config:
+    if args.calibrate or args.save_config or fist_mapping_changed:
         cfg.save(args.config)
         print(f'Calibration saved: {args.config}')
     return cfg

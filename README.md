@@ -234,7 +234,7 @@ Teste nativo reproduzível: `.\.venv\Scripts\python.exe tools/smoke_minimize.py`
 
 ## Experimento: clique esquerdo com punho fechado
 
-Acrescentar `--fist-click` ativa o mapeamento experimental apenas nesta execução (sem `--save-config`). Mão aberta continua a mover; fechar e voltar a abrir rapidamente produz um clique esquerdo; manter o punho fechado ativa hold/arrastamento conforme os limiares de calibração. Abrir a mão liberta o botão. Clique direito, scroll OK e mira mantêm-se.
+Acrescentar `--fist-click` ativa o mapeamento de punho e grava-o automaticamente no perfil selecionado se ainda não estiver guardado. Mão aberta continua a mover; fechar e voltar a abrir rapidamente produz um clique esquerdo; manter o punho fechado ativa hold/arrastamento conforme os limiares de calibração. Abrir a mão liberta o botão. Clique direito, scroll OK e mira mantêm-se.
 
 ```powershell
 .\.venv\Scripts\python.exe main.py --mirror --live --backend native --no-failsafe --diagnostics --config calibration.precise.json --fist-click
@@ -242,7 +242,7 @@ Acrescentar `--fist-click` ativa o mapeamento experimental apenas nesta execuç�
 
 Como o punho passa a clicar, o gesto de **polegar recolhido e quatro dedos estendidos** passa a pausar neste modo. A pausa substituta é confirmada por `fist_pause_ms` (350 ms iniciais no modo de clique com punho), para não confundir uma etapa breve de fechar/abrir a mão com uma pausa intencional. O movimento congela durante essa confirmação. Uma breve pose desconhecida durante a formação do punho pode recuperar dentro de `uncertain_ms`; perder a mão ou desativar continua a libertar imediatamente. F8 pausa/retoma e F9 encerra independentemente desses gestos no desktop normal do Windows.
 
-O painel identifica «Esquerdo: punho fechado» e «Pausa: polegar recolhido». Os logs incluem `left_click_gesture` e `pause_gesture`. Para persistir, usar `--fist-click --save-config`; o campo guardado é `left_click_gesture: "FIST"`. Para voltar ao clique anterior, remover a flag (se não foi gravado) ou usar `--set left_click_gesture=LEFT --save-config`. Movimento e clique não podem usar simultaneamente o punho: essa configuração é rejeitada antes da câmara.
+O painel identifica «Esquerdo: punho fechado» e «Pausa: polegar recolhido». Os logs incluem `left_click_gesture` e `pause_gesture`. O mapeamento guardado é `left_click_gesture: "FIST"`; para voltar ao clique anterior, usar `--set left_click_gesture=LEFT --save-config`. Movimento e clique não podem usar simultaneamente o punho: essa configuração é rejeitada antes da câmara.
 
 ### Quando o punho aparece como desconhecido
 

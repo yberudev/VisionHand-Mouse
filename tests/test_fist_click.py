@@ -1,6 +1,8 @@
 import tempfile
 from pathlib import Path
 import unittest
+from types import SimpleNamespace
+from main import configure
 from config import Config
 from controller import Controller
 from engine import Gesture
@@ -77,6 +79,17 @@ class FistClickTests(unittest.TestCase):
         self.c.stop()
         self.feed(Gesture.FIST,1000)
         self.assertEqual(self.events,[])
+
+    def test_fist_click_option_persists_mapping_without_overwriting_calibration(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path=Path(temp)/'config.json'
+            Config(sensitivity=2.3).save(path)
+            args=SimpleNamespace(config=str(path),set=[],fist_click=True,calibrate=False,save_config=False)
+            cfg=configure(args)
+            saved=Config.load(path)
+            self.assertEqual(cfg.left_click_gesture,'FIST')
+            self.assertEqual(saved.left_click_gesture,'FIST')
+            self.assertEqual(saved.sensitivity,2.3)
 
     def test_gesture_binding_persists(self):
         with tempfile.TemporaryDirectory() as temp:
