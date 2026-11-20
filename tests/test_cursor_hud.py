@@ -1,6 +1,7 @@
 import unittest
 from types import SimpleNamespace
 from cursor_hud import hand_controls_cursor, hud_visible, reticle_geometry
+from x11_hud import reticle_rectangles
 
 
 class CursorHudTests(unittest.TestCase):
@@ -18,6 +19,14 @@ class CursorHudTests(unittest.TestCase):
                                 for a,b,c,d in guides))
             self.assertEqual((box[0]+box[2])/2,x)
             self.assertEqual((box[1]+box[3])/2,y)
+
+    def test_x11_overlay_rectangles_are_clipped_to_the_desktop(self):
+        for x,y in ((0,0),(199,0),(0,99),(199,99),(100,50)):
+            rectangles = reticle_rectangles(x,y,200,100)
+            self.assertTrue(rectangles)
+            self.assertTrue(all(0 <= left < 200 and 0 <= top < 100
+                                and left + width <= 200 and top + height <= 100
+                                for left,top,width,height in rectangles))
 
     def test_stale_or_inactive_control_hides_hud(self):
         self.assertTrue(hud_visible(True,10.,10.1,.4))

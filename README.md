@@ -208,11 +208,11 @@ O movimento usa a mediana de três dimensões da palma e escala suavizada no tem
 
 O JSONL inclui `palm_scale`, `filtered_scale`, `activation` (duração ou distância deliberada), limiares de toque/hold e `uncertainty_ms`. O analisador resume o que foi observado; sem rótulos do utilizador não calcula uma taxa de falsos cliques. Para a próxima sessão, comparar 20 toques curtos e 10 holds/arrastamentos e anotar quais eram intencionais; repetir numa posição próxima, média e distante dentro da faixa indicada.
 
-## Mira verde no cursor (Windows)
+## Mira verde no cursor (Windows e Linux X11)
 
 No modo `--live`, uma mira estilo HUD acompanha o cursor no desktop: caixa de 64 × 64 pixels com o ponto do cursor no centro, cantos reforçados e quatro linhas-guia verdes até às bordas do desktop virtual. O cursor normal continua visível. A mira aparece quando o controlo por gestos está ativo; pausa, perda real ou recuperação escondem-na. Confirmações de gesto e a breve tolerância de incerteza mantêm a mira estável enquanto o controlo continua armado. Ao chegar à borda, a caixa é recortada pelo ecrã, mantendo o cursor no centro geométrico.
 
-A sobreposição usa uma janela nativa Windows layered/transparent/no-activate, sem bordas nem entrada na barra de tarefas. Não recebe cliques ou foco e não injeta eventos de entrada. Corre num processo separado; o controlador só publica estado e heartbeat. Não há dependências adicionais. Se faltar heartbeat durante cerca de 400 ms (ou o timeout de rastreamento configurado, se superior), a mira desaparece. Uma falha detetada no processo visual desativa a mira e mantém o motor de controlo.
+No Windows, a sobreposição usa uma janela nativa layered/transparent/no-activate. No Linux/X11, usa uma janela ARGB transparente e uma região de entrada vazia (ShapeInput), para que o rato continue a interagir com as aplicações por baixo. Ambas ficam sem foco, não injetam eventos de entrada e correm num processo separado; o controlador só publica estado e heartbeat. No Linux, a sessão precisa de compositor com extensões RENDER e SHAPE 1.1. Se faltar heartbeat durante cerca de 400 ms (ou o timeout de rastreamento configurado, se superior), a mira desaparece. Uma falha detetada no processo visual desativa a mira e mantém o motor de controlo.
 
 ```powershell
 .\.venv\Scripts\python.exe main.py --mirror --live --backend native --no-failsafe --diagnostics --config calibration.precise.json
@@ -220,7 +220,7 @@ A sobreposição usa uma janela nativa Windows layered/transparent/no-activate, 
 .\.venv\Scripts\python.exe main.py --mirror --live --backend native --no-failsafe --config calibration.precise.json --no-hud
 ```
 
-A mira funciona também com `--no-preview`. Está desativada no modo simulado e fora do Windows. Não aparece sobre o desktop seguro do UAC, e aplicações em modo exclusivo podem não apresentar sobreposições de desktop.
+A mira funciona também com `--no-preview` e fica ativa por padrão em `--live`; `--no-hud` desativa-a. Está desativada no modo simulado, fora do Windows/Linux X11 e em Wayland nativo. No Windows, não aparece sobre o desktop seguro do UAC; em ambos os sistemas, aplicações em modo exclusivo podem ocultar sobreposições de desktop.
 
 Validação visual/nativa sem webcam, cliques ou movimentos: `.\.venv\Scripts\python.exe tools/smoke_hud.py`. A ferramenta mostra a mira brevemente e verifica cor na borda da caixa, estilos, hit-test transparente, preservação do foco, ocultação na pausa e por heartbeat expirado. O teste de hit-test não equivale a uma série de cliques/arrastamentos com utilizador. Referência da transparência: [janelas layered/transparent do Windows](https://learn.microsoft.com/en-us/windows/win32/winmsg/window-features).
 

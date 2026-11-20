@@ -1,6 +1,7 @@
 """Click-through desktop reticle, isolated from camera and mouse event emission."""
 import multiprocessing as mp
 import os
+import sys
 from time import monotonic
 
 
@@ -242,8 +243,13 @@ def _hud_worker(active, heartbeat, stopped, ready, visible, hwnd_value, recoveri
 
 class CursorHud:
     def __init__(self, timeout=.4):
-        if os.name != 'nt':
-            raise RuntimeError('The desktop HUD currently supports Windows only')
+        if os.name == 'nt':
+            target = _hud_worker
+        elif sys.platform.startswith('linux') and os.environ.get('DISPLAY'):
+            from x11_hud import run_x11_hud
+            target = run_x11_hud
+        else:
+            raise RuntimeError('The desktop HUD supports Windows or Linux X11')
         context = mp.get_context('spawn')
         self.active = context.Value('b', False, lock=False)
         self.heartbeat = context.Value('d', monotonic(), lock=False)
@@ -253,10 +259,17 @@ class CursorHud:
         self.hwnd = context.Value('Q', 0, lock=False)
         self.recoveries = context.Value('I', 0, lock=False)
         self.error = context.Array('c', 1024)
-        self.process = context.Process(target=_hud_worker,
+        self.process = context.Process(target=target,
             args=(self.active, self.heartbeat, self.stopped, self.ready, self.visible,
                   self.hwnd, self.recoveries, self.error, timeout), daemon=True, name='InvisibleMouseHUD')
         self.process.start()
+        if not self.ready.wait(3.0):
+            self.close()
+            raise RuntimeError('HUD process did not become ready')
+        if self.error.value:
+            message = self.error.value.decode('utf-8', errors='replace')
+            self.close()
+            raise RuntimeError(f'HUD failed: {message}')
 
     def update(self, active):
         self.heartbeat.value = monotonic()

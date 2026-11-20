@@ -204,7 +204,7 @@ def main():
         return True
 
     try:
-        if args.live and os.name == 'nt' and not args.no_hud:
+        if args.live and not args.no_hud:
             try:
                 hud = CursorHud(timeout=max(.4, cfg.max_gap_ms/1000+.1))
             except (OSError, RuntimeError) as error:
